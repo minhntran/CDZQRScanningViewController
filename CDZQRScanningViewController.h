@@ -29,11 +29,9 @@ typedef NS_ENUM(NSInteger, CDZQRScanningViewControllerErrorCode) {
  *
  *  @param metadataObjectTypes An array of `AVMetadataMachineReadableCodeObject`s
  *
- *  @param guidingFrame Initial rect of animated overlay guiding frame, similar to iPhone Passbook QR Code scanner, set to CGRectZero to use default value
- *
  *  @return Scanning view controller configured to accept the given metadata object types
  */
-- (instancetype)initWithMetadataObjectTypes:(NSArray *)metadataObjectTypes guidingFrame:(CGRect)guidingFrame;
+- (instancetype)initWithMetadataObjectTypes:(NSArray *)metadataObjectTypes;
 
 /**
  *  Returns a scanning view controller configured to accept QR codes
@@ -53,5 +51,10 @@ typedef NS_ENUM(NSInteger, CDZQRScanningViewControllerErrorCode) {
  *  An array of `AVMetadataMachineReadableCodeObject`s
  */
 @property (nonatomic, strong, readonly) NSArray *metadataObjectTypes;
+
+/**
+ * guidingFrame Initial rect of animated overlay guiding frame, similar to iPhone Passbook QR Code scanner, set to CGRectZero to use default value
+ */
+@property (nonatomic) CGRect guidingFrame;
 
 @end
