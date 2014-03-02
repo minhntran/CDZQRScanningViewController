@@ -18,24 +18,6 @@
 #define CDZStrongSelf __typeof__(self)
 #endif
 
-static AVCaptureVideoOrientation CDZVideoOrientationFromInterfaceOrientation(UIInterfaceOrientation interfaceOrientation)
-{
-    switch (interfaceOrientation) {
-        case UIInterfaceOrientationPortrait:
-            return AVCaptureVideoOrientationPortrait;
-            break;
-        case UIInterfaceOrientationLandscapeLeft:
-            return AVCaptureVideoOrientationLandscapeLeft;
-            break;
-        case UIInterfaceOrientationLandscapeRight:
-            return AVCaptureVideoOrientationLandscapeRight;
-            break;
-        case UIInterfaceOrientationPortraitUpsideDown:
-            return AVCaptureVideoOrientationPortraitUpsideDown;
-            break;
-    }
-}
-
 static const float CDZQRScanningTorchLevel = 0.25;
 static const NSTimeInterval CDZQRScanningTorchActivationDelay = 0.25;
 
@@ -46,25 +28,30 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
 @property (nonatomic, strong) AVCaptureSession *avSession;
 @property (nonatomic, strong) AVCaptureDevice *captureDevice;
 @property (nonatomic, strong) AVCaptureVideoPreviewLayer *previewLayer;
+@property (nonatomic, strong) CALayer *guidingFrameLayer;
 
 @property (nonatomic, copy) NSString *lastCapturedString;
 
 @property (nonatomic, strong, readwrite) NSArray *metadataObjectTypes;
 
+@property (nonatomic) CGRect guidingFrame;
+@property (nonatomic, strong) NSTimer * guidingFrameTimer;
+
 @end
 
 @implementation CDZQRScanningViewController
 
-- (instancetype)initWithMetadataObjectTypes:(NSArray *)metadataObjectTypes {
+- (instancetype)initWithMetadataObjectTypes:(NSArray *)metadataObjectTypes guidingFrame:(CGRect)guidingFrame {
     self = [super init];
     if (!self) return nil;
     self.metadataObjectTypes = metadataObjectTypes;
     self.title = NSLocalizedString(@"Scan QR Code", nil);
+    self.guidingFrame = guidingFrame;
     return self;
 }
 
 - (instancetype)init {
-    return [self initWithMetadataObjectTypes:@[ AVMetadataObjectTypeQRCode ]];
+    return [self initWithMetadataObjectTypes:@[ AVMetadataObjectTypeQRCode ] guidingFrame:CGRectZero];
 }
 
 - (void)viewDidLoad {
@@ -136,7 +123,7 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
                 return;
             }
         }
-
+        
         output.metadataObjectTypes = self.metadataObjectTypes;
         [output setMetadataObjectsDelegate:self queue:dispatch_get_main_queue()];
 
@@ -144,7 +131,7 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (self.previewLayer.connection.isVideoOrientationSupported) {
-                self.previewLayer.connection.videoOrientation = CDZVideoOrientationFromInterfaceOrientation(self.interfaceOrientation);
+                self.previewLayer.connection.videoOrientation = self.interfaceOrientation;
             }
 
             [self.avSession startRunning];
@@ -155,9 +142,39 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
     self.previewLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
     self.previewLayer.frame = self.view.bounds;
     if (self.previewLayer.connection.isVideoOrientationSupported) {
-        self.previewLayer.connection.videoOrientation = CDZVideoOrientationFromInterfaceOrientation(self.interfaceOrientation);
+        self.previewLayer.connection.videoOrientation = self.interfaceOrientation;
     }
     [self.view.layer addSublayer:self.previewLayer];
+    
+    self.guidingFrameLayer = [CALayer layer];
+    self.guidingFrameLayer.frame = self.guidingFrame;
+    self.guidingFrameLayer.borderWidth = 2.0;
+    self.guidingFrameLayer.borderColor = [UIColor redColor].CGColor;
+    self.guidingFrameLayer.opacity = 0.8;
+    [self.view.layer addSublayer:self.guidingFrameLayer];
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+        
+    CABasicAnimation *scaleX = [CABasicAnimation animationWithKeyPath:@"transform.scale.x"];
+    scaleX.toValue = [NSNumber numberWithFloat:1.1];
+    scaleX.fromValue = [NSNumber numberWithFloat:0.95];
+    
+    CABasicAnimation *scaleY = [CABasicAnimation animationWithKeyPath:@"transform.scale.y"];
+    scaleY.toValue = [NSNumber numberWithFloat:0.95];
+    scaleY.fromValue = [NSNumber numberWithFloat:1.1];
+    
+    CAAnimationGroup * animationGroup = [CAAnimationGroup animation];
+    animationGroup.animations = @[scaleX, scaleY];
+    animationGroup.duration = 1.0;
+    animationGroup.fillMode = kCAFillModeForwards;
+    [animationGroup setValue:@"imageTransform" forKey:@"AnimationName"];
+    animationGroup.autoreverses = YES;
+    animationGroup.repeatCount = HUGE_VALF; // forever
+    
+    [self.guidingFrameLayer addAnimation:animationGroup forKey:@"imageTransform"];
 }
 
 - (void)viewDidDisappear:(BOOL)animated {
@@ -168,13 +185,22 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
     [self.avSession stopRunning];
     self.avSession = nil;
     self.captureDevice = nil;
+    
+    [self.guidingFrameLayer removeFromSuperlayer];
+    self.guidingFrameLayer = nil;
+    
+    if (self.guidingFrameTimer)
+    {
+        [self.guidingFrameTimer invalidate];
+        self.guidingFrameTimer = nil;
+    }
 }
 
 - (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation duration:(NSTimeInterval)duration {
     [super willRotateToInterfaceOrientation:toInterfaceOrientation duration:duration];
 
     if (self.previewLayer.connection.isVideoOrientationSupported) {
-        self.previewLayer.connection.videoOrientation = CDZVideoOrientationFromInterfaceOrientation(toInterfaceOrientation);
+        self.previewLayer.connection.videoOrientation = toInterfaceOrientation;
     }
 }
 
@@ -229,18 +255,77 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
 
 - (void)captureOutput:(AVCaptureOutput *)captureOutput didOutputMetadataObjects:(NSArray *)metadataObjects fromConnection:(AVCaptureConnection *)connection {
     NSString *result;
+    CGPoint topleft = CGPointMake(1.0, 1.0);
+    CGPoint bottomRight = CGPointZero;
 
     for (AVMetadataObject *metadata in metadataObjects) {
         if ([self.metadataObjectTypes containsObject:metadata.type]) {
             result = [(AVMetadataMachineReadableCodeObject *)metadata stringValue];
+
+            for (NSDictionary * dictionary in [(AVMetadataMachineReadableCodeObject *)metadata corners]) {
+                CGPoint point;
+                CGPointMakeWithDictionaryRepresentation((CFDictionaryRef)dictionary, &point);
+                if (point.x < topleft.x) topleft.x = point.x;
+                if (point.y < topleft.y) topleft.y = point.y;
+                if (point.x > bottomRight.x) bottomRight.x = point.x;
+                if (point.y > bottomRight.y) bottomRight.y = point.y;
+            }
+            
             break;
         }
     }
+    
+    if (topleft.x < bottomRight.x && topleft.y < bottomRight.y) {
+        
+        if (self.guidingFrameTimer)
+        {
+            [self.guidingFrameTimer invalidate];
+            self.guidingFrameTimer = nil;
+        }
+        
+        CGRect translated = CGRectMake(1.0 - bottomRight.y, topleft.x, bottomRight.y - topleft.y, bottomRight.x - topleft.x);
+        CGRect frame = [UIScreen mainScreen].bounds;
+        frame.origin.x = frame.size.width * translated.origin.x;
+        frame.origin.y = frame.size.height * translated.origin.y;
+        frame.size.width = frame.size.height = frame.size.width * translated.size.width; // make it square
+        frame.origin.y -= 108;
+        
+        [CATransaction begin];
+        self.guidingFrameLayer.frame = frame;
+        [CATransaction commit];
 
+        self.guidingFrameTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(setDefaultGuidingFrame) userInfo:nil repeats:NO];
+    }
+    
     if (result && ![self.lastCapturedString isEqualToString:result]) {
         self.lastCapturedString = result;
         if (self.resultBlock) self.resultBlock(result);
     }
+}
+
+- (CGRect)guidingFrame
+{
+    if (_guidingFrame.size.width == 0)
+    {
+        CGRect frame = CGRectInset(self.view.bounds, 54, 54);
+        // make a square frame
+        frame.size.width = frame.size.height = MIN(frame.size.width, frame.size.height);
+        frame.origin.x = (self.view.frame.size.width - frame.size.width) / 2;
+        frame.origin.y = (self.view.frame.size.height - frame.size.height) / 2 + 44;
+
+        _guidingFrame = frame;
+    }
+    
+    return _guidingFrame;
+}
+
+- (void)setDefaultGuidingFrame
+{
+    [CATransaction begin];
+    [CATransaction setAnimationDuration:1.0];
+    self.guidingFrameLayer.frame = self.guidingFrame;
+    [CATransaction commit];
+    self.guidingFrameTimer = nil;
 }
 
 @end
